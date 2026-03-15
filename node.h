@@ -42,6 +42,7 @@ private:
     void    init_finger_table(Node* n_prime);
     void    update_others();
     void    migrate_keys_on_join();
+    void    fix_self_fingers();
 
     void    setKey(uint8_t key, int value);
     void    eraseKey(uint8_t key);

@@ -95,6 +95,7 @@ void Node::join(Node* n_prime) {
     if (n_prime != nullptr) {
         init_finger_table(n_prime);
         update_others();
+        fix_self_fingers();
         migrate_keys_on_join();
     } else {
         for (int i = 1; i <= M; i++) finger_[i] = this;
@@ -127,12 +128,36 @@ void Node::update_others() {
 }
 
 void Node::update_finger_table(Node* s, int i) {
-    if (s->id_ == id_) return;
-    if (finger_[i] == this || in_range_closed_open(s->id_, id_, finger_[i]->id_)) {
+    if (s->id_ == id_) {
+        // Don't update own finger, but still propagate to predecessor
+        Node* p = predecessor_;
+        if (p != s) p->update_finger_table(s, i);
+        return;
+    }
+    int start = ((int)id_ + (1 << (i-1))) % 256;
+    if (in_range_closed_open(s->id_, start, finger_[i]->id_)) {
         finger_[i] = s;
         Node* p = predecessor_;
         if (p != s) {
             p->update_finger_table(s, i);
+        }
+    }
+}
+
+void Node::fix_self_fingers() {
+    // Stabilization pass: recompute all finger entries from the sorted node list.
+    // Corrects any entries that update_others failed to propagate.
+    for (Node* node : allNodes) {
+        for (int k = 1; k <= M; k++) {
+            int start = ((int)node->id_ + (1 << (k-1))) % 256;
+            Node* correct = allNodes[0];
+            for (Node* n : allNodes) {
+                if ((int)n->id_ >= start) {
+                    correct = n;
+                    break;
+                }
+            }
+            node->finger_[k] = correct;
         }
     }
 }
