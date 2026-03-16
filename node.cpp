@@ -5,25 +5,60 @@
 // Interval helpers
 // ============================================================
 
+// (a, b) — excludes both endpoints
 bool Node::in_range_open(int x, int a, int b) {
-    x &= 0xFF; a &= 0xFF; b &= 0xFF;
-    if (a == b) return (x != a);   // (a, a) = full ring minus {a}
-    if (a < b)  return (x > a && x < b);
-    else        return (x > a || x < b);
+    x &= 0xFF;
+    a &= 0xFF;
+    b &= 0xFF;
+
+    // Degenerate: (a, a) on a ring = everything except a
+    if (a == b) {
+        return x != a;
+    }
+
+    // Normal range, no wraparound
+    if (a < b) {
+        return x > a && x < b;
+    }
+
+    // Wraps around 0: x is past a OR hasn't reached b yet
+    return x > a || x < b;
 }
 
+// (a, b] — excludes a, includes b
 bool Node::in_range_half(int x, int a, int b) {
-    x &= 0xFF; a &= 0xFF; b &= 0xFF;
-    if (a == b) return true;   // (a, a] = full ring
-    if (a < b)  return (x > a && x <= b);
-    else        return (x > a || x <= b);
+    x &= 0xFF;
+    a &= 0xFF;
+    b &= 0xFF;
+
+    // Degenerate: (a, a] on a ring = full ring
+    if (a == b) {
+        return true;
+    }
+
+    if (a < b) {
+        return x > a && x <= b;
+    }
+
+    return x > a || x <= b;
 }
 
+// [a, b) — includes a, excludes b
 bool Node::in_range_closed_open(int x, int a, int b) {
-    x &= 0xFF; a &= 0xFF; b &= 0xFF;
-    if (a == b) return (x == a);
-    if (a < b)  return (x >= a && x < b);
-    else        return (x >= a || x < b);
+    x &= 0xFF;
+    a &= 0xFF;
+    b &= 0xFF;
+
+    // Degenerate: [a, a) = just the point a
+    if (a == b) {
+        return x == a;
+    }
+
+    if (a < b) {
+        return x >= a && x < b;
+    }
+
+    return x >= a || x < b;
 }
 
 // ============================================================
