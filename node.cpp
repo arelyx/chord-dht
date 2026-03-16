@@ -1,37 +1,37 @@
 #include "node.h"
 #include <cassert>
 
-// ============================================================
-// Interval helpers
-// ============================================================
+// --- Interval helpers ---
 
-// (a, b) — excludes both endpoints
+/**
+ * @brief Check if x is in the open interval (a, b) on a mod-256 ring.
+ * Degenerate case: (a, a) = everything except a.
+ */
 bool Node::in_range_open(int x, int a, int b) {
     x &= 0xFF;
     a &= 0xFF;
     b &= 0xFF;
 
-    // Degenerate: (a, a) on a ring = everything except a
     if (a == b) {
         return x != a;
     }
 
-    // Normal range, no wraparound
     if (a < b) {
         return x > a && x < b;
     }
 
-    // Wraps around 0: x is past a OR hasn't reached b yet
     return x > a || x < b;
 }
 
-// (a, b] — excludes a, includes b
+/**
+ * @brief Check if x is in the half-open interval (a, b] on a mod-256 ring.
+ * Degenerate case: (a, a] = full ring.
+ */
 bool Node::in_range_half(int x, int a, int b) {
     x &= 0xFF;
     a &= 0xFF;
     b &= 0xFF;
 
-    // Degenerate: (a, a] on a ring = full ring
     if (a == b) {
         return true;
     }
@@ -43,13 +43,15 @@ bool Node::in_range_half(int x, int a, int b) {
     return x > a || x <= b;
 }
 
-// [a, b) — includes a, excludes b
+/**
+ * @brief Check if x is in the closed-open interval [a, b) on a mod-256 ring.
+ * Degenerate case: [a, a) = just the point a.
+ */
 bool Node::in_range_closed_open(int x, int a, int b) {
     x &= 0xFF;
     a &= 0xFF;
     b &= 0xFF;
 
-    // Degenerate: [a, a) = just the point a
     if (a == b) {
         return x == a;
     }
@@ -61,10 +63,9 @@ bool Node::in_range_closed_open(int x, int a, int b) {
     return x >= a || x < b;
 }
 
-// ============================================================
-// Key helpers (insertion-order preserving)
-// ============================================================
+// --- Key helpers ---
 
+/** @brief Insert or update a key, preserving insertion order. */
 void Node::setKey(uint8_t key, int value) {
     for (auto& kv : localKeys_) {
         if (kv.first == key) { kv.second = value; return; }
@@ -72,6 +73,7 @@ void Node::setKey(uint8_t key, int value) {
     localKeys_.emplace_back(key, value);
 }
 
+/** @brief Remove a key by value. */
 void Node::eraseKey(uint8_t key) {
     localKeys_.erase(
         std::remove_if(localKeys_.begin(), localKeys_.end(),
@@ -79,6 +81,7 @@ void Node::eraseKey(uint8_t key) {
         localKeys_.end());
 }
 
+/** @brief Look up a key's value. Returns -2 if not found, -1 for None. */
 int Node::getKey(uint8_t key) {
     for (auto& kv : localKeys_) {
         if (kv.first == key) return kv.second;
@@ -86,21 +89,22 @@ int Node::getKey(uint8_t key) {
     return -2;
 }
 
-// ============================================================
-// Constructor
-// ============================================================
+// --- Constructor ---
 
 Node::Node(uint8_t id) : id_(id), predecessor_(nullptr), finger_(M + 1, nullptr) {}
 
-// ============================================================
-// Chord core: find_successor, find_predecessor, closest_preceding_finger
-// ============================================================
+// --- Chord routing ---
 
+/** @brief Find the first node clockwise from id (inclusive). */
 Node* Node::find_successor(uint8_t id) {
     Node* pred = find_predecessor(id);
     return pred->successor();
 }
 
+/**
+ * @brief Find the node immediately before id on the ring.
+ * Hops through finger tables until id falls in (n', successor(n')].
+ */
 Node* Node::find_predecessor(uint8_t id) {
     Node* n_prime = this;
     while (!in_range_half(id, n_prime->id_, n_prime->successor()->id_)) {
@@ -109,6 +113,10 @@ Node* Node::find_predecessor(uint8_t id) {
     return n_prime;
 }
 
+/**
+ * @brief Return the finger closest to id that precedes it.
+ * Scans from the largest finger down for the biggest safe hop.
+ */
 Node* Node::closest_preceding_finger(uint8_t id) {
     for (int i = M; i >= 1; i--) {
         if (in_range_open(finger_[i]->id_, id_, id)) {
@@ -118,10 +126,12 @@ Node* Node::closest_preceding_finger(uint8_t id) {
     return this;
 }
 
-// ============================================================
-// Join
-// ============================================================
+// --- Join ---
 
+/**
+ * @brief Join the ring. Pass nullptr to bootstrap as the first node.
+ * Otherwise pass any existing node as an entry point.
+ */
 void Node::join(Node* n_prime) {
     allNodes.push_back(this);
     std::sort(allNodes.begin(), allNodes.end(),
@@ -138,6 +148,10 @@ void Node::join(Node* n_prime) {
     }
 }
 
+/**
+ * @brief Build this node's finger table using n_prime as a lookup helper.
+ * Also splices this node into the predecessor/successor chain.
+ */
 void Node::init_finger_table(Node* n_prime) {
     finger_[1] = n_prime->find_successor((id_ + 1) % 256);
 
@@ -154,6 +168,10 @@ void Node::init_finger_table(Node* n_prime) {
     }
 }
 
+/**
+ * @brief Notify existing nodes that their finger tables may need
+ * to include this newly joined node.
+ */
 void Node::update_others() {
     for (int i = 1; i <= M; i++) {
         int val = ((int)id_ - (1 << (i-1)) + 256) % 256;
@@ -162,6 +180,10 @@ void Node::update_others() {
     }
 }
 
+/**
+ * @brief Recursively update finger[i] to s if s is a closer successor,
+ * then propagate counter-clockwise through predecessors.
+ */
 void Node::update_finger_table(Node* s, int i) {
     int start = ((int)id_ + (1 << (i-1))) % 256;
     if (in_range_closed_open(s->id_, start, finger_[i]->id_)) {
@@ -173,9 +195,12 @@ void Node::update_finger_table(Node* s, int i) {
     }
 }
 
+/**
+ * @brief Stabilization pass after update_others.
+ * Recomputes any finger entries that incremental propagation missed
+ * (known limitation of the Chord paper's algorithm in small rings).
+ */
 void Node::fix_self_fingers() {
-    // Stabilization pass: recompute all finger entries from the sorted node list.
-    // Corrects any entries that update_others failed to propagate.
     for (Node* node : allNodes) {
         for (int k = 1; k <= M; k++) {
             int start = ((int)node->id_ + (1 << (k-1))) % 256;
@@ -191,6 +216,10 @@ void Node::fix_self_fingers() {
     }
 }
 
+/**
+ * @brief Transfer keys from successor that now belong to this node.
+ * Called after this node joins and its responsible range is established.
+ */
 void Node::migrate_keys_on_join() {
     Node* succ = successor();
     std::vector<uint8_t> to_migrate;
@@ -213,24 +242,26 @@ void Node::migrate_keys_on_join() {
     }
 }
 
-// ============================================================
-// Insert / Remove
-// ============================================================
+// --- Insert / Remove ---
 
+/** @brief Route key to its responsible node and store the value. */
 void Node::insert(uint8_t key, int value) {
     Node* target = find_successor(key);
     target->setKey(key, value);
 }
 
+/** @brief Route key to its responsible node and delete it. */
 void Node::remove(uint8_t key) {
     Node* target = find_successor(key);
     target->eraseKey(key);
 }
 
-// ============================================================
-// Find (lookup with path)
-// ============================================================
+// --- Find ---
 
+/**
+ * @brief Look up a key and print the result.
+ * Path is [origin, responsible] or [origin] if local.
+ */
 void Node::find(uint8_t key) {
     Node* responsible = find_successor(key);
 
@@ -254,25 +285,24 @@ void Node::find(uint8_t key) {
               << " value is "               << value_str << std::endl;
 }
 
-// ============================================================
-// Leave
-// ============================================================
+// --- Leave ---
 
+/**
+ * @brief Remove this node from the ring.
+ * Transfers keys to successor, fixes pointers, updates all finger tables.
+ */
 void Node::leave() {
     Node* succ = successor();
     Node* pred = predecessor_;
 
-    // Transfer keys to successor
     for (auto& kv : localKeys_) {
         succ->setKey(kv.first, kv.second);
     }
     localKeys_.clear();
 
-    // Fix successor/predecessor pointers
     pred->finger_[1] = succ;
     succ->predecessor_ = pred;
 
-    // Update all fingers pointing to this node
     for (Node* node : allNodes) {
         if (node == this) continue;
         for (int i = 1; i <= M; i++) {
@@ -282,20 +312,17 @@ void Node::leave() {
         }
     }
 
-    // Remove from global registry
     allNodes.erase(std::remove(allNodes.begin(), allNodes.end(), this), allNodes.end());
 }
 
-// ============================================================
-// Pretty Print
-// ============================================================
+// --- Output ---
 
+/** @brief Print this node's finger table in the assignment's exact format. */
 void Node::prettyPrint() {
     printf("----------------Node id:%d----------------\n", id_);
     printf("Successor: %d Predecessor: %d\n", (int)successor()->id_, (int)predecessor_->id_);
     printf("FingerTables:\n");
 
-    // Compute pad width for interval alignment
     int idDigits = 1;
     if (id_ >= 10)  idDigits = 2;
     if (id_ >= 100) idDigits = 3;
@@ -311,6 +338,7 @@ void Node::prettyPrint() {
     }
 }
 
+/** @brief Print this node's local keys in insertion order. */
 void Node::printKeys() {
     printf("----------------Node id:%d----------------\n", id_);
     printf("{");
