@@ -128,12 +128,6 @@ void Node::update_others() {
 }
 
 void Node::update_finger_table(Node* s, int i) {
-    if (s->id_ == id_) {
-        // Don't update own finger, but still propagate to predecessor
-        Node* p = predecessor_;
-        if (p != s) p->update_finger_table(s, i);
-        return;
-    }
     int start = ((int)id_ + (1 << (i-1))) % 256;
     if (in_range_closed_open(s->id_, start, finger_[i]->id_)) {
         finger_[i] = s;
